@@ -36,6 +36,9 @@
 #include "../windows/SDL_rawinputjoystick_c.h"
 #endif
 
+#ifdef SDL_USE_LIBUDEV
+#include "../../core/linux/SDL_sandbox.h"
+#endif
 
 struct joystick_hwdata
 {
@@ -72,6 +75,9 @@ static SDL_HIDAPI_DeviceDriver *SDL_HIDAPI_drivers[] = {
     &SDL_HIDAPI_DriverJoyCons,
     &SDL_HIDAPI_DriverSwitch,
 #endif
+#ifdef SDL_JOYSTICK_HIDAPI_WII
+    &SDL_HIDAPI_DriverWii,
+#endif
 #ifdef SDL_JOYSTICK_HIDAPI_XBOX360
     &SDL_HIDAPI_DriverXbox360,
     &SDL_HIDAPI_DriverXbox360W,
@@ -91,7 +97,7 @@ static SDL_bool initialized = SDL_FALSE;
 static SDL_bool shutting_down = SDL_FALSE;
 
 void
-HIDAPI_DumpPacket(const char *prefix, Uint8 *data, int size)
+HIDAPI_DumpPacket(const char *prefix, const Uint8 *data, int size)
 {
     int i;
     char *buffer;
@@ -214,7 +220,7 @@ HIDAPI_IsDeviceSupported(Uint16 vendor_id, Uint16 product_id, Uint16 version, co
 
     for (i = 0; i < SDL_arraysize(SDL_HIDAPI_drivers); ++i) {
         SDL_HIDAPI_DeviceDriver *driver = SDL_HIDAPI_drivers[i];
-        if (driver->enabled && driver->IsSupportedDevice(name, type, vendor_id, product_id, version, -1, 0, 0, 0)) {
+        if (driver->enabled && driver->IsSupportedDevice(NULL, name, type, vendor_id, product_id, version, -1, 0, 0, 0)) {
             return SDL_TRUE;
         }
     }
@@ -251,7 +257,7 @@ HIDAPI_GetDeviceDriver(SDL_HIDAPI_Device *device)
     type = SDL_GetJoystickGameControllerProtocol(device->name, device->vendor_id, device->product_id, device->interface_number, device->interface_class, device->interface_subclass, device->interface_protocol);
     for (i = 0; i < SDL_arraysize(SDL_HIDAPI_drivers); ++i) {
         SDL_HIDAPI_DeviceDriver *driver = SDL_HIDAPI_drivers[i];
-        if (driver->enabled && driver->IsSupportedDevice(device->name, type, device->vendor_id, device->product_id, device->version, device->interface_number, device->interface_class, device->interface_subclass, device->interface_protocol)) {
+        if (driver->enabled && driver->IsSupportedDevice(device, device->name, type, device->vendor_id, device->product_id, device->version, device->interface_number, device->interface_class, device->interface_subclass, device->interface_protocol)) {
             return driver;
         }
     }
@@ -398,11 +404,7 @@ HIDAPI_JoystickInit(void)
             SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
                          "udev disabled by SDL_HIDAPI_JOYSTICK_DISABLE_UDEV");
             linux_enumeration_method = ENUMERATION_FALLBACK;
-        } else if (access("/.flatpak-info", F_OK) == 0
-                   || access("/run/host/container-manager", F_OK) == 0) {
-            /* Explicitly check `/.flatpak-info` because, for old versions of
-             * Flatpak, this was the only available way to tell if we were in
-             * a Flatpak container. */
+        } else if (SDL_DetectSandbox() != SDL_SANDBOX_NONE) {
             SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
                          "Container detected, disabling HIDAPI udev integration");
             linux_enumeration_method = ENUMERATION_FALLBACK;
@@ -713,6 +715,8 @@ HIDAPI_CreateCombinedJoyCons()
     }
 
     for (device = SDL_HIDAPI_devices; device; device = device->next) {
+        Uint16 vendor, product;
+
         if (!device->driver) {
             /* Unsupported device */
             continue;
@@ -722,15 +726,17 @@ HIDAPI_CreateCombinedJoyCons()
             continue;
         }
 
+        SDL_GetJoystickGUIDInfo(device->guid, &vendor, &product, NULL, NULL);
+
         if (!joycons[0] &&
-            (SDL_IsJoystickNintendoSwitchJoyConLeft(device->vendor_id, device->product_id) ||
-             (SDL_IsJoystickNintendoSwitchJoyConGrip(device->vendor_id, device->product_id) &&
+            (SDL_IsJoystickNintendoSwitchJoyConLeft(vendor, product) ||
+             (SDL_IsJoystickNintendoSwitchJoyConGrip(vendor, product) &&
               SDL_strstr(device->name, "(L)") != NULL))) {
             joycons[0] = device;
         }
         if (!joycons[1] &&
-            (SDL_IsJoystickNintendoSwitchJoyConRight(device->vendor_id, device->product_id) ||
-             (SDL_IsJoystickNintendoSwitchJoyConGrip(device->vendor_id, device->product_id) &&
+            (SDL_IsJoystickNintendoSwitchJoyConRight(vendor, product) ||
+             (SDL_IsJoystickNintendoSwitchJoyConGrip(vendor, product) &&
               SDL_strstr(device->name, "(R)") != NULL))) {
             joycons[1] = device;
         }
@@ -828,6 +834,9 @@ check_removed:
                 goto check_removed;
             } else {
                 HIDAPI_DelDevice(device);
+
+                /* Update the device list again in case this device comes back */
+                SDL_HIDAPI_change_count = 0;
             }
         }
         device = next;

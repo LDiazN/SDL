@@ -32,11 +32,29 @@
 #include "SDL_mutex.h"
 #include "SDL_thread.h"
 
+#ifdef realloc
+#undef realloc
+#endif
 #define realloc	SDL_realloc
+#ifdef snprintf
+#undef snprintf
+#endif
 #define snprintf SDL_snprintf
+#ifdef strdup
+#undef strdup
+#endif
 #define strdup  SDL_strdup
+#ifdef strncpy
+#undef strncpy
+#endif
 #define strncpy SDL_strlcpy
+#ifdef tolower
+#undef tolower
+#endif
 #define tolower SDL_tolower
+#ifdef wcsncpy
+#undef wcsncpy
+#endif
 #define wcsncpy SDL_wcslcpy
 
 #ifndef HAVE_WCSDUP
@@ -1105,7 +1123,8 @@ static int SDLCALL read_thread(void *param)
 static void init_xbox360(libusb_device_handle *device_handle, unsigned short idVendor, unsigned short idProduct, struct libusb_config_descriptor *conf_desc)
 {
 	if ((idVendor == 0x05ac && idProduct == 0x055b) /* Gamesir-G3w */ ||
-	    (idVendor == 0x0f0d && idProduct == 0x00dc) /* HORIPAD */) {
+	    (idVendor == 0x0f0d && idProduct == 0x00dc) /* HORIPAD */ ||
+	    (idVendor == 0x0f0d && idProduct == 0x011e) /* Hori Fighting Stick α */) {
 		unsigned char data[20];
 
 		/* The HORIPAD FPS for Nintendo Switch requires this to enable input reports.
